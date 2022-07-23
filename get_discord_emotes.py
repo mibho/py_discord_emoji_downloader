@@ -86,7 +86,6 @@ def getSubString(strData, id_pos_start, id_pos_end):
 
 def placeInDict(strData, id_pos_start, id_pos_end, dType, ourDict, src_type):
 
-    print(strData)
     emote_ID = getSubString(strData, id_pos_start, id_pos_end)
 
     if emote_ID not in ourDict:
