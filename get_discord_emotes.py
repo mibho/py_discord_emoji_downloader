@@ -1,50 +1,25 @@
 #|------------------------------------------------|
 #|                 Imports                        |
 #|------------------------------------------------|
+#--------------------------------------
+# standard imports  
+#--------------------------------------
 import re
 import ctypes
 import sys
 import os
 import requests
+import time
+#--------------------------------------
+# project specific imports  
+#--------------------------------------
+import constants as const
+
+#--------------------------------------
+# public/3rd party imports  
+#--------------------------------------
 from pathlib import Path
 
-#|------------------------------------------------|
-#|                 Constants                      |
-#|------------------------------------------------|
-FOLDER_NAME = "discord_emotes"
-
-# matches /emojis/<img id>.<ext>; eg: /emojis/756572987699757107.webp
-RE_PATTERN_ALL = r'\/([a-z]{6}|([a-z]{8}))\/\d{18}\.([gjpw][einp][bgfp])'
-RE_PATTERN_EMOJIS = r'\/([a-z]{6}|)\/\d{18}\.([gjpw][einp][bgfp])'
-
-DISC_EMOTE_START_URL = "https://cdn.discordapp.com/emojis/"
-DISC_STICKER_START_URL = "https://media.discordapp.net/stickers/"
-ORIG_QUALITY = "?quality=lossless"
-
-EMOTE_OFFSET = 0
-STICKER_OFFSET = 2
-
-PNG_LIST = 1
-GIF_LIST = 2
-NO_MATCH = -1
-SRC_STICKER = 11 
-SRC_EMOJI = 99
-
-HTTP_OK = 200
-HTTP_NOT_MODIFIED = 304
-
-ID_OFFSET_START = 8
-ID_OFFSET_END   = 18
-
-
-# windows messagebox constants; win32 imports not needed :)
-MB_OK          = 0
-MB_YESNOCANCEL = 3
-MB_ICONWARNING = 48
-
-IDCANCEL       = 2
-IDYES          = 6
-IDNO           = 7
 
 #|------------------------------------------------|
 #|                 fn defs                        |
@@ -52,30 +27,31 @@ IDNO           = 7
 
 # regex match contains index of last matched char; we look at that
 def checkExt(strData, index):
-    start = index - 3
-    end   = index - 1
+    start = index - const.OFFSET_FOR_EXT_START
+    end   = index - const.OFFSET_FOR_EXT_END
     firstChar = strData[start]
     lastChar = strData[end]
 
     if (firstChar == 'p' or firstChar == 'w') and (lastChar == 'b' or lastChar == 'g'):
-        return PNG_LIST
+        return const.PNG_LIST
     else:
         if ((firstChar == 'g') and (lastChar == 'f') ):
-            return GIF_LIST
+            return const.GIF_LIST
     
-    return NO_MATCH
+    return const.NO_MATCH
 
 def makeFullURL(file_id_string, src_type):
 
-    if src_type == SRC_STICKER:
-        starturl = DISC_STICKER_START_URL
-    elif src_type == SRC_EMOJI:
-        starturl = DISC_EMOTE_START_URL
+    if src_type == const.SRC_TYPE_ID_STICKER:
+        starturl = const.DISC_STICKER_START_URL
+    
+    elif src_type == const.SRC_TYPE_ID_EMOJI:
+        starturl = const.DISC_EMOTE_START_URL
+    
     else:
         return
 
-
-    return starturl + file_id_string + ORIG_QUALITY
+    return starturl + file_id_string + const.ORIG_QUALITY
 
 def getSubString(strData, id_pos_start, id_pos_end):
 
@@ -97,82 +73,118 @@ def savePicFiles(fileName, fileData):
     with open(fileName, 'wb') as f:
         f.write(fileData)
 
+def moveToFolder(folderName):
+    if not os.path.isdir(folderName):
+        Path(folderName).mkdir(parents=True, exist_ok=True)
+
+    os.chdir(folderName)
+
+
+def filterDuplicates(ourDict):
+
+    for item in os.scandir('.'):
+        if item.is_file():
+            fileName = Path(item.name).stem
+            if fileName in ourDict:
+                del ourDict[fileName]
+
+def createMessageBox(msg, title_name, flag):
+    return ctypes.windll.user32.MessageBoxW(None, msg, title_name, flag)
 
 #|------------------------------------------------|
 #|                 main stuff                     |
 #|------------------------------------------------|
+def run():
+    try:
 
-try:
-    txt_file = sys.argv[1] 
+        txt_file = sys.argv[1] 
 
-    if txt_file:
-        emote_urls = {}
-        failedCount = 0
+        if txt_file:
+            emote_urls = {}
+            failedCount = 0
 
-        with open(txt_file, errors="ignore") as f: # ignore 'unrecognizable' chars
-            for line in f:
-                match = re.search(RE_PATTERN_ALL, line)
-                if match:
-                    
-                    spanVals = match.span()                    
-                    extType = checkExt(line, spanVals[1])
-
-                    if extType != NO_MATCH:
-                        src_val = 0
+            with open(txt_file, errors="ignore") as f: # ignore 'unrecognizable' chars
+                for line in f:
+                    match = re.search(const.RE_PATTERN_ALL, line)
+                    if match:
                         
-                        dictIndexStart = spanVals[0]
-                        secondLetter = dictIndexStart + 1
-                        dictIndexStart += ID_OFFSET_START # get to start of emote ID part; ie, need to move 8 chars (/emojis/)
-                                                          # /stickers/ is 2 chars more than (/emojis/), hence the offset addition coming up
-                        if line[secondLetter] == 'e': 
-                            src_val = SRC_EMOJI
+                        spanVals = match.span()                    
+                        extType = checkExt(line, spanVals[1])
+
+                        if extType != const.NO_MATCH:
+                            src_val = 0
                             
+                            dictIndexStart = spanVals[0]
+                            secondLetter = dictIndexStart + 1
+                            dictIndexStart += const.OFFSET_FOR_START_ID # get to start of emote ID part; ie, need to move 8 chars (/emojis/)
+                                                            # /stickers/ is 2 chars more than (/emojis/), hence the offset addition coming up
+                            if line[secondLetter] == 'e': 
+                                src_val = const.SRC_TYPE_ID_EMOJI
+                                
 
-                        elif line[secondLetter] == 's':
-                            src_val = SRC_STICKER
-                            dictIndexStart += STICKER_OFFSET
-    
-                        dictIndexEnd = dictIndexStart + ID_OFFSET_END
-                        placeInDict(line, dictIndexStart, dictIndexEnd , extType, emote_urls, src_val)
+                            elif line[secondLetter] == 's':
+                                src_val = const.SRC_TYPE_ID_STICKER
+                                dictIndexStart += const.STICKER_INDEX_OFFSET
         
-        if len(emote_urls) != 0:
-            result = ctypes.windll.user32.MessageBoxW(None, 'parsed emote links for a total of: ' + str(len(emote_urls)) + ' links' + '\n' + 'download?',  'Matches found!', MB_YESNOCANCEL)
-        else:
-            result = ctypes.windll.user32.MessageBoxW(None, 'no emote links parsed; check input .txt file data', 'Error: No matches found', MB_OK )
-
-       
-        
-        if result == IDYES:
+                            dictIndexEnd = dictIndexStart + const.OFFSET_FOR_END_ID
+                            placeInDict(line, dictIndexStart, dictIndexEnd , extType, emote_urls, src_val)
             
-            Path(FOLDER_NAME).mkdir(parents=True, exist_ok=True)
-            os.chdir(FOLDER_NAME)
+            orig_len = len(emote_urls)
 
-            
-
-            for item in emote_urls:
-                downloadurl = emote_urls[item][1]
-                fileType = emote_urls[item][0]
-
-                requestedPage = requests.get(downloadurl, headers={'User-Agent': 'Mozilla/5.0'}, timeout= 2)
-
-
-                if fileType == PNG_LIST:
-                    createdFileName = item + ".png"
-                elif fileType == GIF_LIST:
-                    createdFileName = item + ".gif"
-                
-                if (requestedPage.status_code == HTTP_OK or requestedPage.status_code == HTTP_NOT_MODIFIED):
-                    savePicFiles(createdFileName, requestedPage.content)
-                else:
-                    failedCount += 1
-        
-            if failedCount:
-                ctypes.windll.user32.MessageBoxW(None, 'Failed to grab ' + str(failedCount) + ' emotes', 'Error: missed some data', MB_ICONWARNING )
+            if orig_len != 0:
+                result = createMessageBox('parsed emote links for a total of: ' + str(orig_len) + ' links' + '\n' + 'download?',  'Matches found!', const.W32_MB_YESNOCANCEL)
             else:
-                ctypes.windll.user32.MessageBoxW(None, 'all emotes obtained :)', 'thabk u', MB_OK )
+                result = createMessageBox('no emote links parsed; check input .txt file data', 'Error: No matches found', const.W32_MB_OK )
+
         
-        # 
+            
+            if result == const.W32_IDYES:                
+                
+                moveToFolder(const.FOLDER_NAME)
+
+                filterDuplicates(emote_urls)
+                number = 1
+                filteredListLen = len(emote_urls)
+                diff = orig_len - filteredListLen
+
+                createMessageBox(str(diff) + ' have already been downloaded. \n' + 'downloading remaining ' + str(filteredListLen) + ' links', 'Matches found!', const.W32_MB_OK )
+
+                for item in emote_urls:
+                    downloadurl = emote_urls[item][1]
+                    fileType = emote_urls[item][0]
+                    
+                    time.sleep(const.REQ_DELAY)
+                    requestedPage = requests.get(downloadurl, headers={'User-Agent': 'Mozilla/5.0'}, timeout= None)
+                    if requestedPage:
+                        
+                        if fileType == const.PNG_LIST:
+                            createdFileName = item + ".png"
+                        elif fileType == const.GIF_LIST:
+                            createdFileName = item + ".gif"
+                        
+                    
+
+                        if (requestedPage.status_code == const.HTTP_OK or requestedPage.status_code == const.HTTP_NOT_MODIFIED):
+                            savePicFiles(createdFileName, requestedPage.content)
+                            status = "success!"
+                        else:
+                            failedCount += 1
+                            status = "fail w/ HTTP Error: " + str(requestedPage.status_code)
+
+                        print(str(number) + "/" + str(filteredListLen) + ": " + status)
+
+                        number += 1
+
+                if failedCount:
+                    createMessageBox('Failed to grab ' + str(failedCount) + ' emotes', 'Error: missed some data', const.W32_MB_ICONWARNING )
+                else:
+                    createMessageBox('all emotes obtained :)', 'thabk u', const.W32_MB_OK )
+            
+            # 
 
 
-except IndexError:
-    ctypes.windll.user32.MessageBoxW(None, 'Please drag and drop a .txt file! Exiting...', 'Error: No input file', MB_ICONWARNING )
+    except IndexError:
+        createMessageBox('Please drag and drop a .txt file! Exiting...', 'Error: No input file', const.W32_MB_ICONWARNING )
+
+
+run()
